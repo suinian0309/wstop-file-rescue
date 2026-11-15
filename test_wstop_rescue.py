@@ -1,12 +1,13 @@
 from contextlib import redirect_stdout
 import hashlib
 from io import StringIO
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from generate_samples import scramble
-from wstop_rescue import RescueError, learn, recover_file
+from generate_samples import KEY, TAG, scramble
+from wstop_rescue import RescueError, learn, load_stream, recover_file
 
 
 class RecoveryTest(unittest.TestCase):
@@ -51,6 +52,29 @@ class RecoveryTest(unittest.TestCase):
         b[0].write_bytes(b"C" * 300)
         with self.assertRaises(RescueError), redirect_stdout(StringIO()):
             learn([a, b])
+
+    def test_stream_manifest_and_marker_checks(self):
+        metadata = self.root / "public.json"
+        stream = KEY[:200]
+        data = metadata.with_suffix(".bin")
+        data.write_bytes(stream)
+        metadata.write_text(json.dumps({
+            "format": "wstop-stream-v1",
+            "marker_sha256": hashlib.sha256(TAG).hexdigest(),
+            "stream_bytes": len(stream),
+            "stream_sha256": hashlib.sha256(stream).hexdigest(),
+        }), encoding="utf-8")
+        model = load_stream(metadata)
+        original, encoded = self.pair("target", b"P" * 128)
+        out = self.root / "restored"
+        recover_file(encoded, out, model)
+        self.assertEqual(out.read_bytes(), original.read_bytes())
+        encoded.write_bytes(b"X" + encoded.read_bytes()[1:])
+        with self.assertRaises(RescueError):
+            recover_file(encoded, self.root / "wrong-marker", model)
+        data.write_bytes(b"X" + stream[1:])
+        with self.assertRaises(RescueError):
+            load_stream(metadata)
 
 
 if __name__ == "__main__":

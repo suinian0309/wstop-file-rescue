@@ -1,2 +1,3 @@
 samples/*.txt text eol=lf
 samples/*.wstop binary
+streams/*.bin binary
